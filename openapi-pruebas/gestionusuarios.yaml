@@ -1,0 +1,69 @@
+openapi: 3.0.3
+info:
+  title: API de Gestión de Usuarios (Ejemplo Incorrecto)
+  description: API para demostrar fallos de validación.
+  # ❌ ERROR G-001: No sigue SemVer (X.Y.Z)
+  version: "v1" 
+  contact:
+    name: Soporte Externo
+    # ❌ ERROR G-002: El email no es @miempresa.com
+    email: developer@gmail.com 
+
+servers:
+  - url: https://api.ejemplo.com/v1
+
+paths:
+  # ❌ ERROR REST-001: La URL contiene un verbo (get) y camelCase en el path
+  /getUsers:
+    # ❌ ERROR REST-002: Usar POST para obtener/leer datos
+    post:
+      summary: Obtiene todos los usuarios
+      # ❌ ERROR REST-004: operationId usa snake_case, debería ser camelCase
+      operationId: get_all_users
+      responses:
+        # ❌ ERROR REST-003: Solo hay respuesta 200, faltan los errores (400, 500)
+        '200':
+          description: Lista de usuarios retornada exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/user_info'
+
+  # ❌ ERROR REST-001: URL en singular (user) en lugar de plural (users)
+  /user/create:
+    post:
+      summary: Crea un nuevo usuario
+      operationId: createUser
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/user_info'
+      responses:
+        '200':
+          description: Usuario creado
+
+components:
+  schemas:
+    # ❌ ERROR G-003: El nombre del Schema está en snake_case (debería ser PascalCase: UserInfo)
+    user_info:
+      type: object
+      properties:
+        # ❌ ERROR G-003: La propiedad está en PascalCase (debería ser camelCase: userId)
+        UserId:
+          type: integer
+          example: 123
+        
+        # ❌ ERROR G-003: La propiedad está en snake_case (debería ser camelCase: fullName)
+        full_name:
+          type: string
+          example: "Juan Pérez"
+        
+        created_at:
+          # ❌ ERROR DATA-001: Es string sin formato (debería tener format: date-time)
+          type: string
+          example: "2023-10-25 10:00:00"
+
+# ❌ ERROR SEC-001: Falta completamente la sección 'securitySchemes' y 'security'
