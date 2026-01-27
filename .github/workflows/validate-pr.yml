@@ -82,7 +82,7 @@ jobs:
           COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           
-          RULES_REPO: "diegobblue/rules-prueba"
+          RULES_REPO: "d1ekgo/OpenApi-AsyncApi-SPECS"
           RULES_FILE: "docs/guidelines.md"
           
         run: |
