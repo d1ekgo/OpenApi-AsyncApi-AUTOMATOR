@@ -1,0 +1,150 @@
+name: Validate PR with Copilot CLI
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_url:
+        description: 'URL del PR a validar (ej: https://github.com/owner/repo/pull/1)'
+        required: true
+        type: string
+
+permissions:
+  contents: read      # Para leer el repo actual
+  pull-requests: write # Para comentar en el PR (Importante)
+
+jobs:
+  validate-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # 1. Preparación Básica
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse PR URL
+        id: pr
+        run: |
+          PR_URL="${{ github.event.inputs.pr_url }}"
+          if [[ ! "$PR_URL" =~ ^https://github\.com/([^/]+)/([^/]+)/pull/([0-9]+)$ ]]; then
+            echo "::error::URL inválida. Formato esperado: https://github.com/owner/repo/pull/123"
+            exit 1
+          fi
+          OWNER="${BASH_REMATCH[1]}"
+          REPO="${BASH_REMATCH[2]}"
+          PR_NUMBER="${BASH_REMATCH[3]}"
+          
+          echo "owner=${OWNER}" >> $GITHUB_OUTPUT
+          echo "repo=${REPO}" >> $GITHUB_OUTPUT
+          echo "number=${PR_NUMBER}" >> $GITHUB_OUTPUT
+          echo "full_repo=${OWNER}/${REPO}" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Authenticate GitHub CLI
+        run: |
+          echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+          gh auth setup-git
+
+      # 2. Infraestructura MCP (El "puente" al otro repo)
+      - name: Install Copilot CLI & MCP Server
+        run: |
+          npm install -g @github/copilot
+          npm install -g @modelcontextprotocol/server-github
+
+      - name: Configure MCP
+        run: |
+          mkdir -p ~/.config/github-copilot
+          # Aquí conectamos la CLI con el servidor MCP
+          cat <<EOF > ~/.config/github-copilot/mcp.json
+          {
+            "mcpServers": {
+              "github": {
+                "command": "npx",
+                "args": ["-y", "@modelcontextprotocol/server-github"],
+                "env": {
+                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GH_PAT }}"
+                }
+              }
+            }
+          }
+          EOF
+
+# 3. Ejecución de la IA
+      - name: Validate PR with Copilot
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          
+          RULES_REPO: "diegobblue/rules-prueba"
+          RULES_FILE: "docs/guidelines.md"
+          
+        run: |
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+          FULL_REPO="${{ steps.pr.outputs.full_repo }}"
+          REPO="${{ steps.pr.outputs.repo }}"
+
+          echo "=== Iniciando Validación ==="
+          echo "Reglas desde: ${RULES_REPO}/${RULES_FILE}"
+          echo "Validando PR: ${FULL_REPO} #${PR_NUMBER}"
+
+          # Usamos 'set +e' para manejar el error nosotros mismos
+          set +e
+          
+          # CAMBIO 1: Modificamos el prompt para que NO intente comentar, solo generar texto.
+          OUTPUT=$(copilot -p "Actúa como un Auditor de Calidad Senior.
+          
+          Tienes configurado un servidor MCP de GitHub. Realiza lo siguiente EN ORDEN:
+
+          1.  **OBTENER REGLAS:** Usa 'read_file' (o get_contents) para leer '${RULES_FILE}' del repositorio '${RULES_REPO}'.
+          2.  **ANALIZAR PR:** Lee el código del PR #${PR_NUMBER} en '${FULL_REPO}'.
+          3.  **COMPARAR:** Cruza estrictamente el código del PR contra las reglas obtenidas.
+          
+          **IMPORTANTE:**
+          Genera un reporte en Markdown con el resultado.
+          NO intentes usar herramientas para publicar el comentario. SOLO genera el texto de salida.
+
+          Formato del Reporte:
+          ## 🤖 Reporte de Calidad Automático
+
+          ### Estado: [APROBADO / RECHAZADO]
+
+          ### 📋 Análisis de Reglas Corporativas
+          
+          | Regla | Estado | Observación |
+          | :--- | :---: | :--- |
+          | [Nombre Regla] | ✅/❌ | [Detalle breve] |
+
+          ### 💡 Sugerencias de Corrección
+          - [Detalle]
+
+          ---
+          <sub>Validado contra ${RULES_REPO}</sub>
+          " --allow-all-tools 2>&1)
+
+          EXIT_CODE=$?
+          set -e
+
+          echo "=== Resultado IA (Logs) ==="
+          echo "$OUTPUT"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::Copilot CLI falló al ejecutarse."
+            exit $EXIT_CODE
+          fi
+          
+          # CAMBIO 2: Publicación MANUAL e INFALIBLE del comentario
+          echo "=== Publicando Comentario en PR ==="
+          gh pr comment "$PR_NUMBER" --body "$OUTPUT" --repo "$FULL_REPO"
+          
+          # Opcional: Fallar el workflow si fue rechazado
+          if echo "$OUTPUT" | grep -q "Estado: RECHAZADO"; then
+             echo "::warning::El PR fue rechazado por la IA."
+             # exit 1 
+          fi
