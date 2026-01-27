@@ -75,57 +75,68 @@ jobs:
           }
           EOF
 
-# 3. Ejecución de la IA
+# 3. Ejecución de la IA (Prompt Optimizado para API Governance)
       - name: Validate PR with Copilot
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           
+          # Tus repositorios configurados
           RULES_REPO: "d1ekgo/OpenApi-AsyncApi-SPECS"
           RULES_FILE: "docs/guidelines.md"
           
         run: |
           PR_NUMBER="${{ steps.pr.outputs.number }}"
           FULL_REPO="${{ steps.pr.outputs.full_repo }}"
-          REPO="${{ steps.pr.outputs.repo }}"
-
-          echo "=== Iniciando Validación ==="
-          echo "Reglas desde: ${RULES_REPO}/${RULES_FILE}"
-          echo "Validando PR: ${FULL_REPO} #${PR_NUMBER}"
-
-          # Usamos 'set +e' para manejar el error nosotros mismos
+          
+          echo "=== Iniciando Validación de API Specs ==="
+          
           set +e
           
-          # CAMBIO 1: Modificamos el prompt para que NO intente comentar, solo generar texto.
-          OUTPUT=$(copilot -p "Actúa como un Auditor de Calidad Senior.
+          # PROMPT ACTUALIZADO: Detección Dinámica OAS/AAS + Estándares Oficiales
+          OUTPUT=$(copilot -p "Actúa como un Experto en API Governance y Estándares de Integración.
           
-          Tienes configurado un servidor MCP de GitHub. Realiza lo siguiente EN ORDEN:
+          Tienes configurado un servidor MCP. Ejecuta la validación en el siguiente orden lógico:
 
-          1.  **OBTENER REGLAS:** Usa 'read_file' (o get_contents) para leer '${RULES_FILE}' del repositorio '${RULES_REPO}'.
-          2.  **ANALIZAR PR:** Lee el código del PR #${PR_NUMBER} en '${FULL_REPO}'.
-          3.  **COMPARAR:** Cruza estrictamente el código del PR contra las reglas obtenidas.
-          
-          **IMPORTANTE:**
-          Genera un reporte en Markdown con el resultado.
-          NO intentes usar herramientas para publicar el comentario. SOLO genera el texto de salida.
+          1. **CONTEXTO CORPORATIVO:**
+             Usa 'read_file' para obtener las Reglas de Diseño de '${RULES_FILE}' en '${RULES_REPO}'.
+             
+          2. **ANÁLISIS DEL PR:**
+             Lee los archivos modificados en el PR #${PR_NUMBER} ('${FULL_REPO}'). Ignora archivos que no sean YAML/JSON de especificación.
 
+          3. **DETECCIÓN Y VALIDACIÓN (Paso Crítico):**
+             Para cada archivo de especificación encontrado, determina dinámicamente:
+             
+             A) **¿Es OpenAPI (OAS)?** (Busca la clave 'openapi: 3.x')
+                - Si SÍ: Valida rigurosamente contra el **Estándar Oficial OpenAPI 3.0/3.1** (estructura, objetos requeridos, security schemes) Y contra las **Reglas Corporativas** del paso 1.
+                
+             B) **¿Es AsyncAPI (AAS)?** (Busca la clave 'asyncapi: 2.x/3.x')
+                - Si SÍ: Valida rigurosamente contra el **Estándar Oficial AsyncAPI** (channels, messages, payload) Y contra las **Reglas Corporativas** del paso 1.
+
+          4. **REPORTE:**
+             Genera un reporte Markdown. NO intentes comentar, solo genera texto.
+             
           Formato del Reporte:
-          ## 🤖 Reporte de Calidad Automático
+          ## 🔍 Validación de Especificaciones API
 
-          ### Estado: [APROBADO / RECHAZADO]
+          ### 📄 Archivo Detectado: [Nombre del archivo] ([Tipo: OAS/AAS])
 
-          ### 📋 Análisis de Reglas Corporativas
-          
+          #### 1️⃣ Validación Estándar Oficial (Syntax & Structure)
+          | Estado | Hallazgo |
+          | :---: | :--- |
+          | ✅/❌ | [Ej: Estructura válida / Falta 'info.version'] |
+
+          #### 2️⃣ Validación Reglas Corporativas
           | Regla | Estado | Observación |
           | :--- | :---: | :--- |
-          | [Nombre Regla] | ✅/❌ | [Detalle breve] |
+          | [Nombre Regla] | ✅/❌ | [Detalle] |
 
-          ### 💡 Sugerencias de Corrección
-          - [Detalle]
+          ### 💡 Acciones Requeridas
+          - [Lista de correcciones]
 
           ---
-          <sub>Validado contra ${RULES_REPO}</sub>
+          <sub>Validado con Copilot + MCP (Standards & Corp Rules)</sub>
           " --allow-all-tools 2>&1)
 
           EXIT_CODE=$?
@@ -139,12 +150,10 @@ jobs:
             exit $EXIT_CODE
           fi
           
-          # CAMBIO 2: Publicación MANUAL e INFALIBLE del comentario
+          # Publicación en el PR
           echo "=== Publicando Comentario en PR ==="
           gh pr comment "$PR_NUMBER" --body "$OUTPUT" --repo "$FULL_REPO"
           
-          # Opcional: Fallar el workflow si fue rechazado
-          if echo "$OUTPUT" | grep -q "Estado: RECHAZADO"; then
-             echo "::warning::El PR fue rechazado por la IA."
-             # exit 1 
+          if echo "$OUTPUT" | grep -q "Estado: ❌"; then
+             echo "::warning::Se detectaron errores en la especificación."
           fi
