@@ -1,4 +1,4 @@
-name: Validate PR with Copilot CLI
+name: BX AsyncAPI Technical Audit
 
 on:
   workflow_dispatch:
@@ -9,8 +9,7 @@ on:
         type: string
 
 permissions:
-  contents: read      # Para leer el repo actual
-  pull-requests: write # Para comentar en el PR (Importante)
+  contents: read
 
 jobs:
   validate-pr:
@@ -18,7 +17,6 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # 1. Preparación Básica
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -26,8 +24,11 @@ jobs:
 
       - name: Parse PR URL
         id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           PR_URL="${{ github.event.inputs.pr_url }}"
+          # Validar formato de URL
           if [[ ! "$PR_URL" =~ ^https://github\.com/([^/]+)/([^/]+)/pull/([0-9]+)$ ]]; then
             echo "::error::URL inválida. Formato esperado: https://github.com/owner/repo/pull/123"
             exit 1
@@ -35,12 +36,13 @@ jobs:
           OWNER="${BASH_REMATCH[1]}"
           REPO="${BASH_REMATCH[2]}"
           PR_NUMBER="${BASH_REMATCH[3]}"
-          
           echo "owner=${OWNER}" >> $GITHUB_OUTPUT
           echo "repo=${REPO}" >> $GITHUB_OUTPUT
           echo "number=${PR_NUMBER}" >> $GITHUB_OUTPUT
           echo "full_repo=${OWNER}/${REPO}" >> $GITHUB_OUTPUT
-
+          echo "Owner: ${OWNER}"
+          echo "Repo: ${REPO}"
+          echo "PR Number: ${PR_NUMBER}"
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -49,111 +51,105 @@ jobs:
       - name: Authenticate GitHub CLI
         run: |
           echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+          gh auth status
           gh auth setup-git
-
-      # 2. Infraestructura MCP (El "puente" al otro repo)
-      - name: Install Copilot CLI & MCP Server
+          
+      - name: Install GitHub Copilot CLI
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           npm install -g @github/copilot
-          npm install -g @modelcontextprotocol/server-github
-
-      - name: Configure MCP
-        run: |
-          mkdir -p ~/.config/github-copilot
-          # Aquí conectamos la CLI con el servidor MCP
-          cat <<EOF > ~/.config/github-copilot/mcp.json
-          {
-            "mcpServers": {
-              "github": {
-                "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-github"],
-                "env": {
-                  "GITHUB_PERSONAL_ACCESS_TOKEN": "${{ secrets.GH_PAT }}"
-                }
-              }
-            }
-          }
-          EOF
-
-# 3. Ejecución de la IA (Prompt Optimizado para API Governance)
-      - name: Validate PR with Copilot
+          copilot --version
+      - name: Debug Copilot CLI
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          echo "=== Token validation ==="
+          echo "First 10 chars of token: ${GITHUB_TOKEN:0:10}"
           
-          # Tus repositorios configurados
-          RULES_REPO: "d1ekgo/OpenApi-AsyncApi-SPECS"
-          RULES_FILE: "docs/guidelines.md"
+          echo ""
+          echo "=== Copilot access API check ==="
+          curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+               -H "Accept: application/vnd.github+json" \
+               https://api.github.com/user/copilot/access | jq '.'
           
+          echo ""
+          echo "=== Testing Copilot CLI ==="
+          copilot -p "Say hello" 2>&1 | head -20
+      - name: Validate PR with Copilot CLI
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          MCP_TOKEN: ${{ secrets.MCP_TOKEN }}
         run: |
           PR_NUMBER="${{ steps.pr.outputs.number }}"
           FULL_REPO="${{ steps.pr.outputs.full_repo }}"
-          
-          echo "=== Iniciando Validación de API Specs ==="
-          
+          REPO="${{ steps.pr.outputs.repo }}"
+          echo "=== Starting Copilot CLI ==="
+          echo "PR Number: ${PR_NUMBER}"
+          echo "Repository: ${REPO}"
+          # Capturar output y errores para diagnóstico
           set +e
+          OUTPUT=$(copilot -p "Eres un AUDITOR TÉCNICO BX especializado en AsyncAPI 3.0+.
           
-          # PROMPT ACTUALIZADO: Detección Dinámica OAS/AAS + Estándares Oficiales
-          OUTPUT=$(copilot -p "Actúa como un Experto en API Governance y Estándares de Integración.
-          
-          Tienes configurado un servidor MCP. Ejecuta la validación en el siguiente orden lógico:
-
-          1. **CONTEXTO CORPORATIVO:**
-             Usa 'read_file' para obtener las Reglas de Diseño de '${RULES_FILE}' en '${RULES_REPO}'.
-             
-          2. **ANÁLISIS DEL PR:**
-             Lee los archivos modificados en el PR #${PR_NUMBER} ('${FULL_REPO}'). Ignora archivos que no sean YAML/JSON de especificación.
-
-          3. **DETECCIÓN Y VALIDACIÓN (Paso Crítico):**
-             Para cada archivo de especificación encontrado, determina dinámicamente:
-             
-             A) **¿Es OpenAPI (OAS)?** (Busca la clave 'openapi: 3.x')
-                - Si SÍ: Valida rigurosamente contra el **Estándar Oficial OpenAPI 3.0/3.1** (estructura, objetos requeridos, security schemes) Y contra las **Reglas Corporativas** del paso 1.
-                
-             B) **¿Es AsyncAPI (AAS)?** (Busca la clave 'asyncapi: 2.x/3.x')
-                - Si SÍ: Valida rigurosamente contra el **Estándar Oficial AsyncAPI** (channels, messages, payload) Y contra las **Reglas Corporativas** del paso 1.
-
-          4. **REPORTE:**
-             Genera un reporte Markdown. NO intentes comentar, solo genera texto.
-             
-          Formato del Reporte:
-          ## 🔍 Validación de Especificaciones API
-
-          ### 📄 Archivo Detectado: [Nombre del archivo] ([Tipo: OAS/AAS])
-
-          #### 1️⃣ Validación Estándar Oficial (Syntax & Structure)
-          | Estado | Hallazgo |
-          | :---: | :--- |
-          | ✅/❌ | [Ej: Estructura válida / Falta 'info.version'] |
-
-          #### 2️⃣ Validación Reglas Corporativas
-          | Regla | Estado | Observación |
-          | :--- | :---: | :--- |
-          | [Nombre Regla] | ✅/❌ | [Detalle] |
-
-          ### 💡 Acciones Requeridas
-          - [Lista de correcciones]
-
-          ---
-          <sub>Validado con Copilot + MCP (Standards & Corp Rules)</sub>
+          TAREAS:
+          1. CONTEXTO DE REGLAS:
+             Usa el MCP server para leer el repo 'OpenApi-AsyncApi-SPECS' de diegobblue.
+             Busca específicamente en la carpeta 'docs' los archivos que definen las reglas de validación.
+             Extrae y memoriza las reglas de: ESTRUCTURA, HEADERS, FORMATO, CLARIDAD Y NOMENCLATURA.
+          2. ANÁLISIS DEL PR:
+             Lee los archivos modificados en el PR #${PR_NUMBER} del repo ${FULL_REPO}.
+             **IMPORTANTE:** Ignora archivos de configuración (.gitignore, README, etc.).
+             Céntrate UNICAMENTE en el archivo de especificación de la API (.yaml, .yml o .json).
+          3. EJECUCIÓN DE AUDITORÍA:
+             Aplica las reglas extraídas al archivo de especificación.
+          4. PUBLICACIÓN (IMPORTANTE):
+             Usa el MCP server para publicar el resultado como un comentario en el PR #${PR_NUMBER} de ${REPO}.
+          REGLAS DE ORO (ESTRICTAS):
+          - **Identificación de Errores:** Si falta un campo obligatorio (ej. headers, channels), marca como 'MISSING' y clasifícalo inmediatamente como **Severidad: error**.
+          - **Evidencia:** Si encuentras un error, cita el valor actual o indica explícitamente 'Campo no encontrado'.
+          - **Criterio de Decisión:**
+            - 0 Errores + 0 Warnings = ✅ APROBADO (Clean) -> APPROVED
+            - 0 Errores + >0 Warnings = ⚠️ CON OBSERVACIONES -> APPROVED
+            - >0 Errores = ⛔ RECHAZADO -> REJECTED
+          FORMATO DE SALIDA (Para el comentario):
+          ## 🤖 Informe de Auditoría Técnica AsyncAPI BX
+          ### 1) RESUMEN EJECUTIVO
+          - **ESTADO:** [✅ APROBADO / ⚠️ CON OBSERVACIONES / ⛔ RECHAZADO]
+          - **DECISIÓN FINAL:** [APROBADO / RECHAZADO]
+          - **MÉTRICAS:** 🔴 Errores: [Cantidad] | 🟡 Advertencias: [Cantidad]
+          - **CONCLUSIÓN:** [Breve frase explicando la decisión]
+          ### 2) TABLAS DE CUMPLIMIENTO
+          #### Estructura
+          | Regla | Severidad | Estado | Hallazgo/Evidencia |
+          | :--- | :--- | :---: | :--- |
+          | [Nombre Regla] | [error/warning] | [✅/❌] | [Cita el valor incorrecto o 'Campo faltante'] |
+          #### Headers
+          | Regla | Severidad | Estado | Hallazgo/Evidencia |
+          | :--- | :--- | :---: | :--- |
+          | ... | ... | ... | ... |
+          #### Formato
+          | Regla | Severidad | Estado | Hallazgo/Evidencia |
+          | :--- | :--- | :---: | :--- |
+          | ... | ... | ... | ... |
+          #### Claridad
+          | Regla | Severidad | Estado | Hallazgo/Evidencia |
+          | :--- | :--- | :---: | :--- |
+          | ... | ... | ... | ... |
+          #### Nomenclatura
+          | Regla | Severidad | Estado | Hallazgo/Evidencia |
+          | :--- | :--- | :---: | :--- |
+          | ... | ... | ... | ... |
           " --allow-all-tools 2>&1)
-
           EXIT_CODE=$?
           set -e
-
-          echo "=== Resultado IA (Logs) ==="
-          echo "$OUTPUT"
-
+          echo "=== Copilot CLI Output ==="
+          echo "${OUTPUT}"
+          echo "=== Exit Code: ${EXIT_CODE} ==="
           if [ $EXIT_CODE -ne 0 ]; then
-            echo "::error::Copilot CLI falló al ejecutarse."
+            echo "::error::Copilot CLI failed with exit code ${EXIT_CODE}"
             exit $EXIT_CODE
-          fi
-          
-          # Publicación en el PR
-          echo "=== Publicando Comentario en PR ==="
-          gh pr comment "$PR_NUMBER" --body "$OUTPUT" --repo "$FULL_REPO"
-          
-          if echo "$OUTPUT" | grep -q "Estado: ❌"; then
-             echo "::warning::Se detectaron errores en la especificación."
           fi
