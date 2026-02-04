@@ -1,0 +1,135 @@
+name: BX API Technical Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_url:
+        description: 'URL del PR a validar (ej: https://github.com/owner/repo/pull/1)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse PR URL
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          PR_URL="${{ github.event.inputs.pr_url }}"
+          if [[ ! "$PR_URL" =~ ^https://github\.com/([^/]+)/([^/]+)/pull/([0-9]+)$ ]]; then
+            echo "::error::URL inválida"
+            exit 1
+          fi
+
+          echo "owner=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          echo "repo=${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
+          echo "number=${BASH_REMATCH[3]}" >> $GITHUB_OUTPUT
+          echo "full_repo=${BASH_REMATCH[1]}/${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Spectral
+        run: npm install -g @stoplight/spectral-cli
+
+      - name: Authenticate GitHub CLI
+        run: |
+          echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+          gh auth setup-git
+
+      - name: Clone API Governance Specs
+        run: |
+          git clone https://github.com/diegobblue/OpenApi-AsyncApi-SPECS.git
+
+      - name: Detect modified API spec and type
+        id: spec
+        run: |
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+          FULL_REPO="${{ steps.pr.outputs.full_repo }}"
+
+          gh pr checkout "$PR_NUMBER"
+
+          FILE=$(git diff --name-only origin/main...HEAD | grep -E '\.(yaml|yml|json)$' | head -1)
+
+          if [ -z "$FILE" ]; then
+            echo "::error::No API spec file found in PR"
+            exit 1
+          fi
+
+          if grep -q '^openapi:' "$FILE"; then
+            TYPE="openapi"
+          elif grep -q '^asyncapi:' "$FILE"; then
+            TYPE="asyncapi"
+          else
+            echo "::error::Cannot determine spec type"
+            exit 1
+          fi
+
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          echo "type=$TYPE" >> $GITHUB_OUTPUT
+
+      - name: Run Spectral (metrics only)
+        id: spectral
+        continue-on-error: true
+        run: |
+          TYPE="${{ steps.spec.outputs.type }}"
+          FILE="${{ steps.spec.outputs.file }}"
+
+          RULESET="OpenApi-AsyncApi-SPECS/rulesets/${TYPE}-ruleset.yaml"
+
+          spectral lint "$FILE" -r "$RULESET" -f json > spectral-result.json || true
+
+          ERRORS=$(jq '[.[] | select(.severity==0)] | length' spectral-result.json)
+          WARNINGS=$(jq '[.[] | select(.severity==1)] | length' spectral-result.json)
+
+          echo "errors=$ERRORS" >> $GITHUB_OUTPUT
+          echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
+
+      - name: Install GitHub Copilot CLI
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          npm install -g @github/copilot
+
+      - name: Validate PR with Copilot CLI
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          MCP_TOKEN: ${{ secrets.MCP_TOKEN }}
+        run: |
+          TYPE="${{ steps.spec.outputs.type }}"
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+          FULL_REPO="${{ steps.pr.outputs.full_repo }}"
+
+          PROMPT_FILE="OpenApi-AsyncApi-SPECS/prompts/${TYPE}-prompt.md"
+          GUIDELINE_FILE="OpenApi-AsyncApi-SPECS/docs/${TYPE}-guidelines.md"
+
+          PROMPT=$(cat "$PROMPT_FILE")
+
+          copilot -p "
+          $PROMPT
+
+          ---
+          CONTEXTO ADICIONAL:
+          - spectralErrors: ${{ steps.spectral.outputs.errors }}
+          - spectralWarnings: ${{ steps.spectral.outputs.warnings }}
+
+          El análisis SEMÁNTICO debe COMPLEMENTAR Spectral.
+          NO reportes reglas ya cubiertas por Spectral.
+          " --allow-all-tools
