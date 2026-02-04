@@ -60,8 +60,6 @@ jobs:
         id: spec
         run: |
           PR_NUMBER="${{ steps.pr.outputs.number }}"
-          FULL_REPO="${{ steps.pr.outputs.full_repo }}"
-
           gh pr checkout "$PR_NUMBER"
 
           FILE=$(git diff --name-only origin/main...HEAD | grep -E '\.(yaml|yml|json)$' | head -1)
@@ -83,13 +81,12 @@ jobs:
           echo "file=$FILE" >> $GITHUB_OUTPUT
           echo "type=$TYPE" >> $GITHUB_OUTPUT
 
-      - name: Run Spectral (metrics only)
+      - name: Run Spectral (collect results)
         id: spectral
         continue-on-error: true
         run: |
           TYPE="${{ steps.spec.outputs.type }}"
           FILE="${{ steps.spec.outputs.file }}"
-
           RULESET="OpenApi-AsyncApi-SPECS/rulesets/${TYPE}-ruleset.yaml"
 
           spectral lint "$FILE" -r "$RULESET" -f json > spectral-result.json || true
@@ -100,30 +97,34 @@ jobs:
           echo "errors=$ERRORS" >> $GITHUB_OUTPUT
           echo "warnings=$WARNINGS" >> $GITHUB_OUTPUT
 
+          echo "### 🔧 Hallazgos Automáticos (Spectral)" > spectral.md
+
+          jq -r '
+            .[] |
+            "#### ❌ " +
+            (if .severity==0 then "Error" else "Warning" end) + "\n" +
+            "- Regla: \(.code)\n" +
+            "- Ubicación: \(.path | join("."))\n" +
+            "- Mensaje: \(.message)\n"
+          ' spectral-result.json >> spectral.md
+
       - name: Install GitHub Copilot CLI
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          npm install -g @github/copilot
+        run: npm install -g @github/copilot
 
       - name: Validate PR with Copilot CLI
+        id: copilot
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
           MCP_TOKEN: ${{ secrets.MCP_TOKEN }}
         run: |
           TYPE="${{ steps.spec.outputs.type }}"
-          PR_NUMBER="${{ steps.pr.outputs.number }}"
-          FULL_REPO="${{ steps.pr.outputs.full_repo }}"
-
           PROMPT_FILE="OpenApi-AsyncApi-SPECS/prompts/${TYPE}-prompt.md"
-          GUIDELINE_FILE="OpenApi-AsyncApi-SPECS/docs/${TYPE}-guidelines.md"
-
-          PROMPT=$(cat "$PROMPT_FILE")
 
           copilot -p "
-          $PROMPT
+          $(cat $PROMPT_FILE)
 
           ---
           CONTEXTO ADICIONAL:
@@ -132,4 +133,40 @@ jobs:
 
           El análisis SEMÁNTICO debe COMPLEMENTAR Spectral.
           NO reportes reglas ya cubiertas por Spectral.
-          " --allow-all-tools
+          " --allow-all-tools > copilot.md
+
+      - name: Post Audit Comment to PR
+        run: |
+          PR_NUMBER="${{ steps.pr.outputs.number }}"
+          TYPE="${{ steps.spec.outputs.type }}"
+          FILE="${{ steps.spec.outputs.file }}"
+
+          COMMENT=$(cat <<EOF
+          ## 🤖 BX API Technical Audit Report
+
+          ### 🔍 Contexto del Análisis
+          - Tipo de Especificación: ${TYPE}
+          - Archivo Analizado: ${FILE}
+
+          ---
+
+          ### 📊 Métricas de Calidad
+
+          | Fuente   | Errores 🔴 | Advertencias 🟡 |
+          |--------|------------|----------------|
+          | Spectral | ${{ steps.spectral.outputs.errors }} | ${{ steps.spectral.outputs.warnings }} |
+          | Copilot | (ver sección abajo) | (ver sección abajo) |
+
+          ---
+
+          $(cat spectral.md)
+
+          ---
+
+          ### 🧠 Hallazgos Semánticos (Copilot)
+
+          $(cat copilot.md)
+          EOF
+          )
+
+          gh pr comment "$PR_NUMBER" --body "$COMMENT"
