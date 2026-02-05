@@ -1,0 +1,202 @@
+name: BX API Technical Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_url:
+        description: 'URL del PR a validar'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse PR URL
+        id: pr
+        run: |
+          PR_URL="${{ github.event.inputs.pr_url }}"
+          if [[ ! "$PR_URL" =~ ^https://github\.com/([^/]+)/([^/]+)/pull/([0-9]+)$ ]]; then
+            echo "::error::URL inválida"
+            exit 1
+          fi
+          echo "owner=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          echo "repo=${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
+          echo "number=${BASH_REMATCH[3]}" >> $GITHUB_OUTPUT
+          echo "full_repo=${BASH_REMATCH[1]}/${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Spectral
+        run: npm install -g @stoplight/spectral-cli@6.6.0
+
+      - name: Authenticate GitHub CLI
+        run: |
+          echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
+          gh auth setup-git
+
+      - name: Clone API Governance Specs
+        run: git clone https://github.com/diegobblue/OpenApi-AsyncApi-SPECS.git
+
+      - name: Get PR metadata
+        id: prmeta
+        run: |
+          AUTHOR=$(gh pr view "${{ steps.pr.outputs.number }}" \
+            --repo "${{ steps.pr.outputs.full_repo }}" \
+            --json author -q '.author.login')
+          echo "author=$AUTHOR" >> $GITHUB_OUTPUT
+
+      - name: Detect modified API spec and type
+        id: spec
+        run: |
+          gh pr checkout "${{ steps.pr.outputs.number }}"
+          FILE=$(git diff --name-only origin/main...HEAD | grep -E '\.(yaml|yml|json)$' | head -1)
+          if [ -z "$FILE" ]; then
+            echo "::error::No API spec file found in PR"
+            exit 1
+          fi
+          if grep -q '^openapi:' "$FILE"; then TYPE="openapi"
+          elif grep -q '^asyncapi:' "$FILE"; then TYPE="asyncapi"
+          else
+            echo "::error::Cannot determine spec type"
+            exit 1
+          fi
+          echo "file=$FILE" >> $GITHUB_OUTPUT
+          echo "type=$TYPE" >> $GITHUB_OUTPUT
+
+      - name: Run Spectral
+        id: spectral
+        continue-on-error: true
+        run: |
+          RULESET="OpenApi-AsyncApi-SPECS/rulesets/${{ steps.spec.outputs.type }}-rules.yaml"
+          spectral lint "${{ steps.spec.outputs.file }}" -r "$RULESET" -f json > spectral.json || true
+          
+          # 1. Métricas Numéricas
+          ERRORS=$(jq '[.[] | select(.severity==0)] | length' spectral.json)
+          WARNINGS=$(jq '[.[] | select(.severity==1)] | length' spectral.json)
+          
+          # 2. EXTRAER NOMBRES DE REGLAS (Solo Errores)
+          # Saca los códigos, los une con comas (ej: "rule1,rule2")
+          SPECTRAL_RULES=$(jq -r '[.[] | select(.severity==0) | .code] | join(",")' spectral.json)
+
+          echo "spectral_errors=$ERRORS" >> $GITHUB_OUTPUT
+          echo "spectral_warnings=$WARNINGS" >> $GITHUB_OUTPUT
+          echo "spectral_rules=$SPECTRAL_RULES" >> $GITHUB_OUTPUT
+
+      - name: Install GitHub Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Run Copilot semantic audit
+        id: copilot
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          PROMPT="OpenApi-AsyncApi-SPECS/prompts/${{ steps.spec.outputs.type }}-prompt.md"
+          copilot -p "$(cat $PROMPT)" --allow-all-tools > copilot.md
+          
+          echo "🔎 Copilot raw output:"
+          cat copilot.md
+          
+          # Métricas Numéricas
+          COPILOT_ERRORS=$(grep "copilotErrors:" copilot.md | head -1 | sed 's/[^0-9]*//g')
+          COPILOT_WARNINGS=$(grep "copilotWarnings:" copilot.md | head -1 | sed 's/[^0-9]*//g')
+          if [ -z "$COPILOT_ERRORS" ]; then COPILOT_ERRORS=0; fi
+          if [ -z "$COPILOT_WARNINGS" ]; then COPILOT_WARNINGS=0; fi
+          
+          # EXTRAER NOMBRES DE REGLAS SEMÁNTICAS
+          # Busca "[Regla Violada]: Nombre", limpia espacios y une con comas
+          COPILOT_RULES=$(grep "\[Regla Violada\]" copilot.md | cut -d':' -f2 | sed 's/^ *//' | tr '\n' ',' | sed 's/,$//')
+
+          echo "copilot_errors=$COPILOT_ERRORS" >> $GITHUB_OUTPUT
+          echo "copilot_warnings=$COPILOT_WARNINGS" >> $GITHUB_OUTPUT
+          echo "copilot_rules=$COPILOT_RULES" >> $GITHUB_OUTPUT
+
+      - name: Calculate totals
+        id: totals
+        run: |
+          TOTAL_ERRORS=$(( ${{ steps.spectral.outputs.spectral_errors }} + ${{ steps.copilot.outputs.copilot_errors }} ))
+          TOTAL_WARNINGS=$(( ${{ steps.spectral.outputs.spectral_warnings }} + ${{ steps.copilot.outputs.copilot_warnings }} ))
+          STATUS="PASS"
+          if [ "$TOTAL_ERRORS" -gt 0 ]; then STATUS="FAIL"; fi
+          echo "total_errors=$TOTAL_ERRORS" >> $GITHUB_OUTPUT
+          echo "total_warnings=$TOTAL_WARNINGS" >> $GITHUB_OUTPUT
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+
+      - name: Comment PR with Report
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          echo "## 🤖 BX API Technical Audit Report" > pr_report.md
+          echo "### 🔍 Contexto del Análisis" >> pr_report.md
+          echo "- **Tipo de Especificación:** ${{ steps.spec.outputs.type }}" >> pr_report.md
+          echo "- **Archivo Analizado:** ${{ steps.spec.outputs.file }}" >> pr_report.md
+          echo "" >> pr_report.md
+          echo "### 📊 Métricas de Calidad" >> pr_report.md
+          echo "| Fuente | Errores 🔴 | Advertencias 🟡 |" >> pr_report.md
+          echo "| :--- | :---: | :---: |" >> pr_report.md
+          echo "| **Spectral** | ${{ steps.spectral.outputs.spectral_errors }} | ${{ steps.spectral.outputs.spectral_warnings }} |" >> pr_report.md
+          echo "| **Copilot** | ${{ steps.copilot.outputs.copilot_errors }} | ${{ steps.copilot.outputs.copilot_warnings }} |" >> pr_report.md
+          echo "| **TOTAL** | **${{ steps.totals.outputs.total_errors }}** | **${{ steps.totals.outputs.total_warnings }}** |" >> pr_report.md
+          echo "" >> pr_report.md
+          echo "### 🔧 Hallazgos Automáticos (Spectral)" >> pr_report.md
+          if [ -s spectral.json ] && [ "$(cat spectral.json)" != "[]" ]; then
+            jq -r '.[] | (if .severity == 0 then "❌ **Error**" else "⚠️ **Warning**" end) + "\n**Regla:** `" + .code + "`\n**Ubicación:** `" + (.path | join(".")) + "`\n**Mensaje:** " + .message + "\n"' spectral.json >> pr_report.md
+          else
+             echo "✅ **Spectral:** Sin hallazgos." >> pr_report.md
+          fi
+          echo "" >> pr_report.md
+          echo "### 🧠 Hallazgos Semánticos (Copilot)" >> pr_report.md
+          if [ -f copilot.md ]; then
+             sed '/METRICAS_COPILOT/,/---/d' copilot.md >> pr_report.md
+          else
+             echo "No se generó reporte semántico." >> pr_report.md
+          fi
+          echo "---" >> pr_report.md
+          if [ "${{ steps.totals.outputs.status }}" == "FAIL" ]; then
+            echo "### ⛔ **ESTADO FINAL: RECHAZADO**" >> pr_report.md
+            echo "> Se detectaron **${{ steps.totals.outputs.total_errors }} errores bloqueantes** totales." >> pr_report.md
+          else
+            echo "### ✅ **ESTADO FINAL: APROBADO**" >> pr_report.md
+          fi
+          gh pr comment "${{ steps.pr.outputs.number }}" \
+            --repo "${{ steps.pr.outputs.full_repo }}" \
+            --body-file pr_report.md
+
+      - name: Send metrics to Google Sheets
+        if: always()
+        env:
+          SHEETS_WEBHOOK_URL: ${{ secrets.SHEETS_WEBHOOK_URL }}
+        run: |
+          curl -X POST "$SHEETS_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "repo": "${{ steps.pr.outputs.full_repo }}",
+              "pr_number": "${{ steps.pr.outputs.number }}",
+              "pr_author": "${{ steps.prmeta.outputs.author }}",
+              "api_type": "${{ steps.spec.outputs.type }}",
+              "spectral_errors": "${{ steps.spectral.outputs.spectral_errors }}",
+              "spectral_warnings": "${{ steps.spectral.outputs.spectral_warnings }}",
+              "copilot_errors": "${{ steps.copilot.outputs.copilot_errors }}",
+              "copilot_warnings": "${{ steps.copilot.outputs.copilot_warnings }}",
+              "total_errors": "${{ steps.totals.outputs.total_errors }}",
+              "total_warnings": "${{ steps.totals.outputs.total_warnings }}",
+              "status": "${{ steps.totals.outputs.status }}",
+              "spectral_rules_list": "${{ steps.spectral.outputs.spectral_rules }}",
+              "copilot_rules_list": "${{ steps.copilot.outputs.copilot_rules }}"
+            }'
