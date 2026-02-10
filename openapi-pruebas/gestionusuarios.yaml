@@ -1,0 +1,68 @@
+openapi: 3.0.3
+info:
+  title: API de Gestión de Usuarios (Ejemplo Incorrecto)
+  description: API para demostrar fallos de validación.
+  
+  version: "v1" 
+  contact:
+    name: Soporte Externo
+   
+    email: developer@gmail.com 
+
+servers:
+  - url: https://api.ejemplo.com/v1
+
+paths:
+  
+  /getUsers:
+    
+    post:
+      summary: Obtiene todos los usuarios
+      
+      operationId: get_all_users
+      responses:
+        
+        '200':
+          description: Lista de usuarios retornada exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/user_info'
+
+ 
+  /user/create:
+    post:
+      summary: Crea un nuevo usuario
+      operationId: createUser
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/user_info'
+      responses:
+        '200':
+          description: Usuario creado
+
+components:
+  schemas:
+    
+    user_info:
+      type: object
+      properties:
+       
+        UserId:
+          type: integer
+          example: 123
+        
+        
+        full_name:
+          type: string
+          example: "Juan Pérez"
+        
+        created_at:
+          
+          type: string
+          example: "2023-10-25 10:00:00"
+
