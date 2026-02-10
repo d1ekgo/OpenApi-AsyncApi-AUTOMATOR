@@ -1,4 +1,4 @@
-name: BX API Technical Audit
+name: API Technical Audit
 
 on:
   pull_request:
@@ -15,72 +15,85 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      # Obtiene el código del repositorio del PR en el runner para poder ejecutar validaciones y git diff.
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # Trae historial completo para comparar commits base...head del PR.
           fetch-depth: 0
 
+      # Prepara Node.js para instalar herramientas vía npm (Spectral, Copilot CLI).
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # Instala Spectral CLI para linting de OpenAPI/AsyncAPI.
       - name: Install Spectral
         run: npm install -g @stoplight/spectral-cli@6.6.0
 
+      # Autentica GitHub CLI (gh) usando un PAT para poder comentar el PR sin interacción.
       - name: Authenticate GitHub CLI
         run: |
           echo "${{ secrets.GH_PAT }}" | gh auth login --with-token
           gh auth setup-git
+      # Descarga el repo de gobernanza (rulesets/prompts) usando checkout con token (soporta repos privados).
+      - name: Checkout API Governance Specs
+        uses: actions/checkout@v4
+        with:
+          # Repo donde viven rulesets y prompts.
+          repository: diegobblue/OpenApi-AsyncApi-SPECS
+          # Rama/tag/commit de gobernanza (recomendado fijarlo a tag o SHA para estabilidad).
+          ref: main
+          # Directorio destino (evita sobrescribir el repo del PR).
+          path: OpenApi-AsyncApi-SPECS
+          # Token para acceder si el repo es privado.
+          token: ${{ secrets.GH_PAT }}
+          # No necesitas historial completo para rulesets/prompts.
+          fetch-depth: 1
 
-      - name: Clone API Governance Specs
-        run: git clone https://github.com/diegobblue/OpenApi-AsyncApi-SPECS.git
-
+      # Extrae metadata del PR (autor) para reportarlo y enviarlo como métrica.
       - name: Get PR metadata
         id: prmeta
         run: |
           echo "author=${{ github.event.pull_request.user.login }}" >> $GITHUB_OUTPUT
-
+      # Detecta el primer archivo de spec modificado y determina si es OpenAPI o AsyncAPI.
       - name: Detect modified API spec and type
         id: spec
         run: |
           BASE_SHA="${{ github.event.pull_request.base.sha }}"
           HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-
           FILE=$(git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -E '\.(yaml|yml|json)$' | head -1)
           if [ -z "$FILE" ]; then
             echo "::error::No API spec file found in PR"
             exit 1
           fi
-
           if grep -q '^openapi:' "$FILE"; then TYPE="openapi"
           elif grep -q '^asyncapi:' "$FILE"; then TYPE="asyncapi"
           else
             echo "::error::Cannot determine spec type"
             exit 1
           fi
-
           echo "file=$FILE" >> $GITHUB_OUTPUT
           echo "type=$TYPE" >> $GITHUB_OUTPUT
-
+      # Ejecuta Spectral con el ruleset correspondiente y genera un reporte JSON consumible.
       - name: Run Spectral
         id: spectral
         continue-on-error: true
         run: |
           RULESET="OpenApi-AsyncApi-SPECS/rulesets/${{ steps.spec.outputs.type }}-rules.yaml"
           spectral lint "${{ steps.spec.outputs.file }}" -r "$RULESET" -f json > spectral.json || true
-
           ERRORS=$(jq '[.[] | select(.severity==0)] | length' spectral.json)
           WARNINGS=$(jq '[.[] | select(.severity==1)] | length' spectral.json)
           SPECTRAL_RULES=$(jq -r '[.[] | select(.severity==0) | .code] | join(",")' spectral.json)
-
           echo "spectral_errors=$ERRORS" >> $GITHUB_OUTPUT
           echo "spectral_warnings=$WARNINGS" >> $GITHUB_OUTPUT
           echo "spectral_rules=$SPECTRAL_RULES" >> $GITHUB_OUTPUT
-
+      # Instala GitHub Copilot CLI para auditoría semántica.
       - name: Install GitHub Copilot CLI
         run: npm install -g @github/copilot
 
+      # Ejecuta auditoría semántica con Copilot usando prompt del repo de gobernanza.
       - name: Run Copilot semantic audit (code model)
         id: copilot
         env:
@@ -88,33 +101,26 @@ jobs:
           COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           PROMPT="OpenApi-AsyncApi-SPECS/prompts/${{ steps.spec.outputs.type }}-prompt.md"
-
-          # Usa modelo Codex (más orientado a código) y evita auto-update del CLI.
-          # Flags oficiales: --model, --no-auto-update, -p/--prompt, --allow-all-tools, -s/--silent, --stream off
           copilot \
             --no-auto-update \
-            --model "GPT-5.2-Codex" \
-            -p "$(cat "$PROMPT")" \
+            --model "claude-sonnet-4.5" \
+            -p "@${FILE}\n\n$(cat "$PROMPT")" \
             --allow-all-tools \
             --disable-parallel-tools-execution \
             -s \
             --stream off \
             > copilot.md
-
           echo "🔎 Copilot raw output:"
           cat copilot.md
-
           COPILOT_ERRORS=$(grep "copilotErrors:" copilot.md | head -1 | sed 's/[^0-9]*//g')
           COPILOT_WARNINGS=$(grep "copilotWarnings:" copilot.md | head -1 | sed 's/[^0-9]*//g')
           if [ -z "$COPILOT_ERRORS" ]; then COPILOT_ERRORS=0; fi
           if [ -z "$COPILOT_WARNINGS" ]; then COPILOT_WARNINGS=0; fi
-
           COPILOT_RULES=$(grep "\[Regla Violada\]" copilot.md | cut -d':' -f2 | sed 's/^ *//' | tr '\n' ',' | sed 's/,$//')
-
           echo "copilot_errors=$COPILOT_ERRORS" >> $GITHUB_OUTPUT
           echo "copilot_warnings=$COPILOT_WARNINGS" >> $GITHUB_OUTPUT
           echo "copilot_rules=$COPILOT_RULES" >> $GITHUB_OUTPUT
-
+      # Suma resultados y define PASS/FAIL.
       - name: Calculate totals
         id: totals
         run: |
@@ -125,7 +131,7 @@ jobs:
           echo "total_errors=$TOTAL_ERRORS" >> $GITHUB_OUTPUT
           echo "total_warnings=$TOTAL_WARNINGS" >> $GITHUB_OUTPUT
           echo "status=$STATUS" >> $GITHUB_OUTPUT
-
+      # Comenta el PR con el reporte consolidado.
       - name: Comment PR with Report
         if: always()
         env:
@@ -147,14 +153,14 @@ jobs:
           if [ -s spectral.json ] && [ "$(cat spectral.json)" != "[]" ]; then
             jq -r '.[] | (if .severity == 0 then "❌ **Error**" else "⚠️ **Warning**" end) + "\n**Regla:** `" + .code + "`\n**Ubicación:** `" + (.path | join(".")) + "`\n**Mensaje:** " + .message + "\n"' spectral.json >> pr_report.md
           else
-             echo "✅ **Spectral:** Sin hallazgos." >> pr_report.md
+            echo "✅ **Spectral:** Sin hallazgos." >> pr_report.md
           fi
           echo "" >> pr_report.md
           echo "### 🧠 Hallazgos Semánticos (Copilot)" >> pr_report.md
           if [ -f copilot.md ]; then
-             cat copilot.md >> pr_report.md
+            cat copilot.md >> pr_report.md
           else
-             echo "No se generó reporte semántico." >> pr_report.md
+            echo "No se generó reporte semántico." >> pr_report.md
           fi
           echo "---" >> pr_report.md
           if [ "${{ steps.totals.outputs.status }}" == "FAIL" ]; then
@@ -163,11 +169,10 @@ jobs:
           else
             echo "### ✅ **ESTADO FINAL: APROBADO**" >> pr_report.md
           fi
-
           gh pr comment "${{ github.event.pull_request.number }}" \
             --repo "${{ github.repository }}" \
             --body-file pr_report.md
-
+      # Envía métricas a Google Sheets vía webhook.
       - name: Send metrics to Google Sheets
         if: always()
         env:
