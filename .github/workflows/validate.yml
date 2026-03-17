@@ -1,0 +1,135 @@
+name: API Technical Audit
+
+on:
+  pull_request:
+    branches: [ master ]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "spec/**"
+      - "spec/**/*.yml"
+      - "spec/**/*.yaml"
+      - "spec/**/*.json"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: api-audit-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout governance repo
+        uses: actions/checkout@v4
+        with:
+          repository: TU_USUARIO/TU_REPO_GOVERNANCE
+          ref: main
+          path: governance-repo
+          token: ${{ secrets.GOVERNANCE_REPO_TOKEN }}
+          fetch-depth: 1
+          sparse-checkout: |
+            rulesets/openapi-rules.yaml
+            prompts/openapi-prompt.md
+            rulesets/asyncapi-rules.yaml
+            prompts/asyncapi-prompt.md
+          sparse-checkout-cone-mode: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install npm tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install -g @stoplight/spectral-cli@6.6.0
+          for i in 1 2 3 4 5; do
+            echo "Installing @github/copilot (attempt ${i}/5)"
+            if npm install -g @github/copilot; then
+              break
+            fi
+            sleep $((i * 5))
+            if [[ "${i}" -eq 5 ]]; then
+              echo "Failed to install @github/copilot after 5 attempts"
+              exit 1
+            fi
+          done
+
+      - name: Get PR metadata
+        id: prmeta
+        shell: bash
+        run: |
+          echo "author=${{ github.event.pull_request.user.login }}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect modified API spec and type
+        id: spec
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          FILE="$(git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -E '^spec/.*\.(yaml|yml|json)$' | head -1 || true)"
+
+          if [[ -z "$FILE" ]]; then
+            echo "::error::No .yaml/.yml/.json file found in PR under spec/"
+            exit 1
+          fi
+
+          FIRST_CHAR="$(tr -d '\n\r\t ' < "$FILE" | head -c 1 || true)"
+          TYPE=""
+
+          if [[ "$FIRST_CHAR" == "{" ]]; then
+            TYPE="$(jq -r 'if has("openapi") then "openapi" elif has("asyncapi") then "asyncapi" else "" end' "$FILE" 2>/dev/null || true)"
+          else
+            if grep -Eq '^\s*openapi\s*:' "$FILE"; then TYPE="openapi"; fi
+            if grep -Eq '^\s*asyncapi\s*:' "$FILE"; then TYPE="asyncapi"; fi
+          fi
+
+          if [[ -z "$TYPE" ]]; then
+            echo "::error::Cannot determine spec type for '$FILE' (expected top-level openapi/asyncapi)"
+            exit 1
+          fi
+
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"
+          echo "type=$TYPE" >> "$GITHUB_OUTPUT"
+
+      - name: Run OpenAPI audit
+        if: steps.spec.outputs.type == 'openapi'
+        uses: ./.github/actions/validate-openapi
+        with:
+          spec_file: ${{ steps.spec.outputs.file }}
+          pr_number: ${{ github.event.pull_request.number }}
+          pr_author: ${{ steps.prmeta.outputs.author }}
+          repo: ${{ github.repository }}
+          github_token: ${{ github.token }}
+          copilot_token: ${{ secrets.COPILOT_TOKEN }}
+          copilot_model: "gpt-5-mini"
+          gcp_service_account_json: ${{ secrets.SERVICE_ACCOUNT }}
+          governance_dir: governance-repo
+
+      - name: Run AsyncAPI audit
+        if: steps.spec.outputs.type == 'asyncapi'
+        uses: ./.github/actions/validate-asyncapi
+        with:
+          spec_file: ${{ steps.spec.outputs.file }}
+          pr_number: ${{ github.event.pull_request.number }}
+          pr_author: ${{ steps.prmeta.outputs.author }}
+          repo: ${{ github.repository }}
+          github_token: ${{ github.token }}
+          copilot_token: ${{ secrets.COPILOT_TOKEN }}
+          copilot_model: "gpt-5-mini"
+          gcp_service_account_json: ${{ secrets.SERVICE_ACCOUNT }}
+          governance_dir: governance-repo
