@@ -73,8 +73,8 @@ runs:
       run: |
         set -euo pipefail
 
-        RULESET="${{ inputs.governance_dir }}/rulesets/asyncapi-rules.yaml"
-        PROMPT="${{ inputs.governance_dir }}/prompts/asyncapi-prompt.md"
+        RULESET="$GOV_DIR/rulesets/asyncapi-rules.yaml"
+        PROMPT="$GOV_DIR/prompts/asyncapi-prompt.md"
         SPEC="${{ inputs.spec_file }}"
         SCRIPTS_DIR="$ACTION_PATH/scripts"
 
