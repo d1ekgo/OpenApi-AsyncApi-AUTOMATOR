@@ -26,10 +26,25 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
-      - name: Checkout repository
+      - name: Checkout AUTOMATOR
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Checkout SPECS governance repo
+        uses: actions/checkout@v4
+        with:
+          repository: d1ekgo/OpenApi-AsyncApi-SPECS
+          ref: main
+          path: openapi-asyncapi-guid
+          token: ${{ secrets.GOVERNANCE_REPO_TOKEN }}
+          fetch-depth: 1
+          sparse-checkout: |
+            rulesets/openapi-rules.yaml
+            rulesets/asyncapi-rules.yaml
+            prompts/openapi-prompt.md
+            prompts/asyncapi-prompt.md
+          sparse-checkout-cone-mode: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -87,7 +102,7 @@ jobs:
 
       - name: Run OpenAPI audit
         if: steps.spec.outputs.type == 'openapi'
-        uses: d1ekgo/OpenApi-AsyncApi-AUTOMATOR/.github/actions/validate-openapi@main
+        uses: ./.github/actions/validate-openapi
         with:
           spec_file: ${{ steps.spec.outputs.file }}
           pr_number: ${{ github.event.pull_request.number }}
@@ -95,11 +110,11 @@ jobs:
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
           copilot_model: "claude-sonnet-4.5"
-          governance_dir: ${{ github.workspace }}
+          governance_dir: openapi-asyncapi-guid
 
       - name: Run AsyncAPI audit
         if: steps.spec.outputs.type == 'asyncapi'
-        uses: d1ekgo/OpenApi-AsyncApi-AUTOMATOR/.github/actions/validate-asyncapi@main
+        uses: ./.github/actions/validate-asyncapi
         with:
           spec_file: ${{ steps.spec.outputs.file }}
           pr_number: ${{ github.event.pull_request.number }}
@@ -107,4 +122,4 @@ jobs:
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
           copilot_model: "claude-sonnet-4.5"
-          governance_dir: ${{ github.workspace }}
+          governance_dir: openapi-asyncapi-guid
