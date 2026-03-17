@@ -109,7 +109,7 @@ jobs:
           repo: ${{ github.repository }}
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
-          copilot_model: "claude-haiku-4.5"
+          copilot_model: "claude-sonnet-4.5"
           governance_dir: openapi-asyncapi-guid
 
       - name: Run AsyncAPI audit
@@ -121,5 +121,5 @@ jobs:
           repo: ${{ github.repository }}
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
-          copilot_model: "claude-haiku-4.5"
+          copilot_model: "claude-sonnet-4.5"
           governance_dir: openapi-asyncapi-guid
