@@ -9,8 +9,9 @@ inputs:
     required: true
     description: Número de PR.
   pr_author:
-    required: true
-    description: Autor del PR (login).
+    required: false
+    default: ""
+    description: Autor del PR (compatibilidad con la versión anterior).
   repo:
     required: true
     description: owner/repo del PR.
@@ -72,10 +73,15 @@ runs:
       run: |
         set -euo pipefail
 
-          RULESET="$GOV_DIR/rulesets/openapi-rules.yaml"
-          PROMPT="$GOV_DIR/prompts/openapi-prompt.md"
-          SPEC="${{ inputs.spec_file }}"
-          SCRIPTS_DIR="$ACTION_PATH/scripts"
+        GOV_DIR="${{ inputs.governance_dir }}"
+        if [[ "$GOV_DIR" != /* ]]; then
+          GOV_DIR="${GITHUB_WORKSPACE}/${GOV_DIR}"
+        fi
+
+        RULESET="${GOV_DIR}/rulesets/openapi-rules.yaml"
+        PROMPT="${GOV_DIR}/prompts/openapi-prompt.md"
+        SPEC="${{ inputs.spec_file }}"
+        SCRIPTS_DIR="$ACTION_PATH/scripts"
 
         emit_output_escaped() {
           local key="$1" file="$2" value=""
@@ -141,6 +147,9 @@ runs:
             node --version || true
             echo "RULESET=$RULESET"
             echo "SPEC=$SPEC"
+            echo "GOV_DIR=$GOV_DIR"
+            echo "PWD=$(pwd)"
+            ls -la "$GOV_DIR" || true
             ls -la "$RULESET" || true
             nl -ba "$RULESET" | sed -n '1,120p' || true
             echo "=== End Spectral debug ==="
@@ -398,8 +407,10 @@ runs:
           echo "### 🔧 Spectral"
           if [[ "${{ steps.audit.outputs.spectral_failed }}" == "1" ]]; then
             echo "⚠️ Fallo infra: \`${{ steps.audit.outputs.spectral_failed_reason }}\`"
-          else
+          elif [[ -f spectral_render.md ]]; then
             cat spectral_render.md
+          else
+            echo "⚠️ No se pudo generar spectral_render.md"
           fi
           echo ""
           echo "### 🧠 Copilot"
