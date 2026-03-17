@@ -1,0 +1,753 @@
+asyncapi: 3.0.0
+info:
+  title: SNS Orders Global
+  version: 1.0.0
+  description: SNS Orders Global (Created & Updated)
+  license:
+    name: Apache 2.0
+    url: 'https://www.apache.org/licenses/LICENSE-2.0'
+  externalDocs:
+    description: Documentación completa de la API
+    url: >-
+      https://bxpress.atlassian.net/wiki/spaces/ESCSP/pages/936607760/SNS+Orders+Global+Created+Updated
+defaultContentType: application/json
+servers:
+  development-sns:
+    host: sns.us-west-2.amazonaws.com
+    protocol: sns
+    description: development
+  staging-sns:
+    host: sns.us-east-1.amazonaws.com
+    protocol: sns
+    description: staging
+  production-sns:
+    host: sns.us-east-1.amazonaws.com
+    protocol: sns
+    description: production
+channels:
+  topic-ciclos-oscor-orders:
+    address: topic-ciclos-oscor-orders
+    messages:
+      globalOrderSNS.message:
+        $ref: '#/components/messages/messageTotal'
+    description: >-
+      El tópico en el que se notifican las creaciones y actualizaciones de
+      ordenes de servicios
+operations:
+  globalOrderSNS:
+    action: receive
+    channel:
+      $ref: '#/channels/topic-ciclos-oscor-orders'
+    summary: Informar sobre las creaciones y actualización de la orden de servicio
+    messages:
+      - $ref: '#/channels/topic-ciclos-oscor-orders/messages/globalOrderSNS.message'
+components:
+  messages:
+    messageTotal:
+      name: messageTotal
+      title: Creación y actualizacion de la Orden
+      summary: Creación y actualizacion de la orden de servicio
+      traits:
+        - $ref: '#/components/messageTraits/commonHeaders'
+        - $ref: '#/components/messageTraits/transportHeaders'
+        - $ref: '#/components/messageTraits/businessHeaders'
+        - $ref: '#/components/messageTraits/trackingHeaders'
+      payload:
+        $ref: '#/components/schemas/globalOrderBody'
+  schemas:
+    globalOrderBody:
+      type: object
+      info: Cuerpo de evento globalOrder
+      properties:
+        orderId:
+          type: string
+          description: Id de la orden
+          examples:
+            - '8523145698'
+        emissionDate:
+          type: string
+          description: Fecha de creacion de la orden
+          examples:
+            - '2024-02-23T10:52:56Z'
+        referenceOrder:
+          type: string
+          description: Referencia de la orden legada
+          examples:
+            - '545313563'
+        observation:
+          type: string
+          description: Observacion
+          examples:
+            - De que se trata o consideración del envío
+        state:
+          type: string
+          description: Codigo del estado de la orden
+          examples:
+            - D8
+        references:
+          type: array
+          description: Se acumula las referencias de los paquetes
+          items:
+            type: string
+            description: referencia
+            examples:
+              - ref1
+        service:
+          type: string
+          description: >-
+            Tipo de servicio, si viene desde legacy se envia en el campo
+            [service-type]-[product-type]-[product-family]
+          examples:
+            - MD-P-PAQU
+        dangerousShipping:
+          type: boolean
+          description: Es envio peligroso
+          examples:
+            - false
+        declaredValue:
+          type: integer
+          description: Se acumula los valores declarados de los paquetes
+          examples:
+            - 60000
+        orderType:
+          type: integer
+          description: >-
+            Tipo de la Orden (Normal, Cabecera MultiOS, Detalle MultiOS,
+            Contenedor, Multibulto)
+          examples:
+            - 0
+            - 1
+            - 2
+            - 3
+            - 4
+        creationUser:
+          type: string
+          description: Usuario que registra
+          examples:
+            - HFARFAN
+        modifierUser:
+          type: string
+          description: Usuario que modifica
+          examples:
+            - LOCALTESTING
+        creationDate:
+          type: string
+          description: Fecha de creacion
+          examples:
+            - '2024-02-22T10:52:56Z'
+        modifierDate:
+          type: string
+          description: Fecha de actualizacion
+          examples:
+            - '2024-02-25T10:52:56Z'
+        seller:
+          $ref: '#/components/schemas/seller'
+        buyer:
+          $ref: '#/components/schemas/buyer'
+        shipper:
+          $ref: '#/components/schemas/shipper'
+        pickupAddress:
+          $ref: '#/components/schemas/address'
+        deliveryAddress:
+          $ref: '#/components/schemas/address'
+        shipping:
+          $ref: '#/components/schemas/shipping'
+        billing:
+          $ref: '#/components/schemas/billing'
+        complementaryServices:
+          items:
+            $ref: '#/components/schemas/complementaryService'
+        packages:
+          type: array
+          description: Paquetes de la orden
+          items:
+            $ref: '#/components/schemas/packages'
+        taxDocument:
+          type: object
+          $ref: '#/components/schemas/taxDocument'
+    buyer:
+      type: object
+      description: Informacion del comprador
+      properties:
+        name:
+          type: string
+          description: Nombre del comprador
+          examples:
+            - Nombre del destinatario
+        email:
+          type: string
+          description: Correo del comprador
+          examples:
+            - buyer@gmail.com
+        phone:
+          type: string
+          description: Telefono del comprador
+          examples:
+            - '+56989742315'
+        identifier:
+          type: string
+          description: Identificación del comprador
+          examples:
+            - 14568962-0
+    shipper:
+      type: object
+      description: Información de transporte
+      properties:
+        account:
+          type: string
+          description: Cuenta del transportista
+          examples:
+            - '12565463'
+        name:
+          type: string
+          description: Nombre del transportista
+          examples:
+            - Juan Gomez
+    seller:
+      type: object
+      description: Vendedor
+      properties:
+        account:
+          type: string
+          description: Numero de cuenta del vendedor
+          examples:
+            - 98556473-1-85
+        name:
+          type: string
+          description: Nombre del vendedor
+          examples:
+            - Nombre del Vendedor
+        email:
+          type: string
+          description: Email del vendedor
+          examples:
+            - seller@gmail.com
+        phone:
+          type: string
+          description: Telefono del vendedor
+          examples:
+            - '+56978945612'
+        identifier:
+          type: string
+          description: Identificador del vendedor
+          examples:
+            - 13.268.685-8
+    address:
+      type: object
+      description: Direccion
+      properties:
+        street:
+          type: string
+          description: Calle
+          examples:
+            - Calle del Vendedor
+        number:
+          type: string
+          description: Numero de calle
+          examples:
+            - 435
+        commune:
+          type: string
+          description: Codigo de la Comuna
+          examples:
+            - '105'
+        communeDesc:
+          type: string
+          description: Nombre de la Comuna
+          examples:
+            - PUDAHUEL
+        city:
+          type: string
+          description: Ciudad
+          examples:
+            - Santiago
+        complement:
+          type: string
+          description: Complementarios de la direccion
+          examples:
+            - >-
+              Bloque A2, Departamento 601, Piso 5, Officina A23, Codigo Postal
+              2533
+        region:
+          type: string
+          description: Codigo de la Region
+          examples:
+            - '1045'
+        regionDesc:
+          type: string
+          description: Nombre de la Region
+          examples:
+            - Metropolitana de Santiago
+        location:
+          type: string
+          description: Localizacion
+          examples:
+            - SCL
+        agency:
+          type: integer
+          description: Agencia
+          examples:
+            - '15483'
+        geolocation:
+          type: object
+          description: longitud (posicion 0) y latitud (posicion 1)
+          properties:
+            coordinates:
+              $ref: '#/components/schemas/coordinates'
+        apartmentNumber:
+          type: string
+          description: numero de departamento (tener en cuenta que en sistema legado el valor cotiene maximo 6 caracteres)
+          examples:
+            - '501A'
+    billing:
+      type: object
+      description: Datos correspondiente para facturación (Boleta o factura) utilizados en acepta
+      properties:
+        name:
+          type: string
+          description: nombre de la persona/entidad indicada en la factura o boleta
+          examples:
+            - 'Luis Corvalan'
+        address:
+          type: string
+          desciption: Dirección a indicar en factura o boleta
+          examples:
+            - 'Boulevard Poniente, 1313, comp. ANDENES 15 AL 22'
+        rut:
+          type: string
+          desciption: Rut indicado en factura o boleta
+          examples:
+            - '66666666-6'
+        commune:
+          type: string
+          desciption: comuna indicada en factura o boleta
+          examples:
+            - 'Pudahuel'
+        giro:
+          type: string
+          desciption: giro comercial indicado en factura o boleta
+          examples:
+            - 'INDUSTRIA MANUFACTURERA'
+        saleConditions:
+          type: string
+          desciption: condiciones de venta indicada en factura o boleta
+          examples:
+            - 'Contado'
+        city:
+          type: string
+          desciption: ciudad indicada en factura o boleta
+          examples:
+            - 'Santiago'
+        phone:
+          type: string
+          desciption: telefono indicado en factura o boleta
+          examples:
+            - '+56912345678'
+        documentType:
+          type: string
+          desciption: Tipo de rubro del cliente
+          examples:
+            - 'Retail'
+    coordinates:
+      type: array
+      description: Longitud (posicion 0) y Latitud (posicion 1)
+      examples:
+        - - -21.43275
+          - -12.65456
+    complementaryService:
+      type: object
+      description: Servicios complementarios de la orden
+      properties:
+        serviceType:
+          description: Tipo de servicio
+          type: string
+          examples:
+            - DD
+            - CD
+        identifier:
+          description: Identificador del servicio
+          type: string
+          examples:
+            - '124325325'
+        documentType:
+          description: Tipo de documento
+          type: string
+          examples:
+            - BOL
+        amount:
+          description: Monto del servicio
+          type: integer
+          examples:
+            - 21543
+        collections:
+          type: array
+          items:
+            $ref: '#/components/schemas/payment'
+    packages:
+      type: object
+      description: Paquete
+      properties:
+        packageId:
+          type: string
+          description: Id del package
+          examples:
+            - '8523145698001'
+        state:
+          type: integer
+          description: Codigo del estado del paquete
+          examples:
+            - GE
+        referenceChildOrder:
+          type: integer
+          description: Orden de servicio hija de referencia
+          examples:
+            - 8474534354
+        references:
+          type: array
+          description: Referencias de la orden hija
+          items:
+            type: string
+            examples:
+              - ref1
+        declaredValue:
+          type: integer
+          description: Valor declarado de la orden hija
+          examples:
+            - 1455.2
+        size:
+          type: string
+          description: Tamaño del paquete
+          examples:
+            - S
+            - M
+            - L
+        document:
+          type: string
+          description: Id del documento asociada al paquete
+          examples:
+            - docId1
+        deliveryEvidence:
+          $ref: '#/components/schemas/deliveryEvidence'
+        inspection:
+          $ref: '#/components/schemas/inspection'
+    deliveryEvidence:
+      description: Evidencia del delivery
+      type: object
+      properties:
+        receiverName:
+          description: Nombre del receptor
+          type: string
+          examples:
+            - Receiver
+        identifier:
+          description: Identificador de la evidencia
+          type: string
+          examples:
+            - '2345234342'
+        reasonRejection:
+          description: Razón de rechazo
+          type: string
+          examples:
+            - Se rechazo debido a ruptura del paquete
+        phone:
+          description: Telefono
+          type: string
+          examples:
+            - '+2326234634'
+        photoUrls:
+          description: Fotos del delivery
+          type: array
+          examples:
+            - - 'https://test.com/photo1.png'
+              - 'https://test.com/photo2.png'
+        geolocation:
+          type: object
+          description: longitud (posicion 0) y latitud (posicion 1)
+          properties:
+            coordinates:
+              $ref: '#/components/schemas/coordinates'
+    inspection:
+      description: Inspección del paquete
+      type: object
+      properties:
+        height:
+          type: integer
+          description: Altura del paquete
+          examples:
+            - 800.5
+        width:
+          type: integer
+          description: Ancho del paquete
+          examples:
+            - 80.7
+        length:
+          type: integer
+          description: Largo del paquete
+          examples:
+            - 1.7
+        weight:
+          type: integer
+          description: Peso del paquete
+          examples:
+            - 15.6
+        type:
+          type: string
+          description: Tipo de inspeccion (1 = manual)
+          examples:
+            - 1
+        creationUser:
+          type: string
+          description: usuario que hizo la inspeccion
+          examples:
+            - HFARFAN
+        units:
+          $ref: '#/components/schemas/units'
+    units:
+      type: object
+      description: Unidades de medida
+      properties:
+        weight:
+          type: string
+          description: Unidad de medida del Peso
+          examples:
+            - KG
+        length:
+          type: string
+          description: Unidad de medida de Largo
+          examples:
+            - CM
+    detail:
+      type: object
+      description: Detalle
+      properties:
+        quantity:
+          type: integer
+          description: Cantidad de productos en el detalle del documento tributario
+          examples:
+            - 1
+        product:
+          type: string
+          description: Producto en el detalle del documento tributario
+          examples:
+            - Descripción del Producto
+        net:
+          type: string
+          description: Valor neto del producto en el detalle del documento tributario
+          examples:
+            - 3700
+        tax:
+          type: string
+          description: Valor tributario del producto en el detalle del documento tributario
+          examples:
+            - 3700
+        total:
+          type: string
+          description: Valor total del producto en el detalle del documento tributario
+          examples:
+            - 3700
+    shipping:
+      type: object
+      description: Envio de la orden
+      properties:
+        paymentType:
+          type: string
+          description: Tipo de pago del envio
+          examples:
+            - PP
+        tariffPlan:
+          type: integer
+          description: Tarifa del envio
+          examples:
+            - 4000
+        shippingCost:
+          type: integer
+          description: Valor del envio
+          examples:
+            - 4000
+        discount:
+          type: integer
+          description: Descuento del envio
+          examples:
+            - 0
+        freight:
+          type: integer
+          description: El campo freight hace referencia al valor del subtotal neto del envio
+          examples:
+            - 3700
+        tax:
+          type: integer
+          description: Valor del impuesto de transporte del envio
+          examples:
+            - 300
+        payments:
+          type: array
+          items:
+            $ref: '#/components/schemas/payment'
+        taxRate:
+          type: integer
+          description: Valor de porcentaje de impuesto aplicado
+          examples:
+            - 19
+        currencyType:
+          type: string
+          description: Tipo de moneda aplicada
+          examples:
+            - CLP
+    payment:
+      type: object
+      description: Información sobre el pago
+      properties:
+        method:
+          type: string
+          description: Método de pago
+          examples:
+            - CASH
+        date:
+          type: string
+          description: Fecha de pago
+          examples:
+            - '01/11/2023 15:32:45'
+        currency:
+          type: string
+          description: Tipo de moneda
+          examples:
+            - CLP
+        amount:
+          type: integer
+          description: Monto de pago
+          examples:
+            - 21543
+        transactionId:
+          type: string
+          description: Identificador de la transaccion
+          examples:
+            - '4214243'
+        collector:
+          type: string
+          description: Recolector del pago
+          examples:
+            - TUU
+    taxDocument:
+      description: Documento Tributario
+      type: object
+      properties:
+        documentId:
+          description: Identificador del documento
+          type: integer
+          examples:
+            - 124543
+        type:
+          description: Tipo de documento
+          type: string
+          examples:
+            - BOL
+        path:
+          description: Ubicacion web del documento
+          type: string
+          examples:
+            - 'https://test.acepta.com/test/PdfView?url=test_url'
+        receiver:
+          $ref: '#/components/schemas/receiver'
+        detail:
+          $ref: '#/components/schemas/detail'
+    receiver:
+      type: object
+      description: Receptor
+      properties:
+        name:
+          type: integer
+          description: Nombre del receptor
+          examples:
+            - Nombre a quien va dirigido el Documento
+        email:
+          type: string
+          description: Correo del receptor
+          examples:
+            - email@test.tes
+        address:
+          $ref: '#/components/schemas/address'
+  messageTraits:
+    commonHeaders:
+      headers:
+        type: object
+        properties:
+          eventId:
+            type: string
+            description: Id del evento
+            example: dcb2cbb2-09ff-446e-b4e8-f33c5cdd77cb
+          eventType:
+            type: string
+            description: '(created, updated, etc)'
+            examples:
+              - created
+              - updated
+          entityId:
+            type: string
+            description: Id de transacción
+            example: '481676233'
+          entityType:
+            type: string
+            description: order
+            example: order
+          timestamp:
+            type: number
+            description: Unix epoch indicando la ocurrencia del evento.
+            example: 1700766980
+          datetime:
+            type: string
+            description: Fecha humana indicando la ocurrencia del evento
+            example: '2024-02-23T13:53:20Z'
+          version:
+            type: string
+            description: Versión de la estructura del evento
+            format: X.Y
+            example: '1.0'
+    transportHeaders:
+      headers:
+        type: object
+        properties:
+          channel:
+            type: string
+            description: Canal que origina el evento
+            example: web
+    businessHeaders:
+      headers:
+        type: object
+        properties:
+          domain:
+            type: string
+            description: Dominio de negocio del servicio o evento
+            example: corentsu
+          subdomain:
+            type: string
+            description: Subdominio de negocio
+            example: ciclos
+          businessCapacity:
+            type: string
+            description: Capacidad de negocio
+            example: oscor
+    trackingHeaders:
+      headers:
+        type: object
+        properties:
+          traceId:
+            type: string
+            description: Id general de seguimiento
+            format: 32 minúsculas hexadecimal
+            example: fef44dcad950bc564fed2577261c0354
+          spanId:
+            type: string
+            description: Posición actual del evento en el árbol de seguimiento
+            format: 16 minúsculas hexadecimal
+            example: 97f84d39c6918528
+          parentSpanId:
+            type: string
+            description: Posición padre del evento en el árbol de seguimiento
+            format: 16 minúsculas hexadecimal
+            example: 069f65a8ad472f61
+  securitySchemes:
+    saslPlain:
+      type: plain
+      description: >-
+        Proporciona tu nombre de usuario y contraseña para la autenticación
+        SASL/PLAIN
