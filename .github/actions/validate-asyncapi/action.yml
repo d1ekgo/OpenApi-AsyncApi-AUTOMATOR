@@ -73,8 +73,13 @@ runs:
       run: |
         set -euo pipefail
 
-        RULESET="$GOV_DIR/rulesets/asyncapi-rules.yaml"
-        PROMPT="$GOV_DIR/prompts/asyncapi-prompt.md"
+        GOV_DIR="${{ inputs.governance_dir }}"
+        if [[ "$GOV_DIR" != /* ]]; then
+          GOV_DIR="${GITHUB_WORKSPACE}/${GOV_DIR}"
+        fi
+
+        RULESET="${GOV_DIR}/rulesets/asyncapi-rules.yaml"
+        PROMPT="${GOV_DIR}/prompts/asyncapi-prompt.md"
         SPEC="${{ inputs.spec_file }}"
         SCRIPTS_DIR="$ACTION_PATH/scripts"
 
@@ -167,6 +172,9 @@ runs:
             node --version || true
             echo "RULESET=$RULESET"
             echo "SPEC=$SPEC"
+            echo "GOV_DIR=$GOV_DIR"
+            echo "PWD=$(pwd)"
+            ls -la "$GOV_DIR" || true
             ls -la "$RULESET" || true
             nl -ba "$RULESET" | sed -n '1,120p' || true
             echo "=== End Spectral debug ==="
@@ -472,8 +480,10 @@ runs:
           echo "### 🔧 Spectral"
           if [[ "${{ steps.audit.outputs.spectral_failed }}" == "1" ]]; then
             echo "⚠️ Fallo infra: \`${{ steps.audit.outputs.spectral_failed_reason }}\`"
-          else
+          elif [[ -f spectral_render.md ]]; then
             cat spectral_render.md
+          else
+            echo "⚠️ No se pudo generar spectral_render.md"
           fi
           echo
           echo "### 🧠 Copilot"
