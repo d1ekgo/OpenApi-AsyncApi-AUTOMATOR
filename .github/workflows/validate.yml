@@ -95,7 +95,7 @@ jobs:
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
           copilot_model: "claude-sonnet-4.5"
-          governance_dir: .
+          governance_dir: ${{ github.workspace }}
 
       - name: Run AsyncAPI audit
         if: steps.spec.outputs.type == 'asyncapi'
@@ -107,4 +107,4 @@ jobs:
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
           copilot_model: "claude-sonnet-4.5"
-          governance_dir: .
+          governance_dir: ${{ github.workspace }}
