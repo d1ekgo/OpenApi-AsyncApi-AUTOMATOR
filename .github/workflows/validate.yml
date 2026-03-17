@@ -94,7 +94,7 @@ jobs:
           repo: ${{ github.repository }}
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
-          copilot_model: "gpt-5-mini"
+          copilot_model: "claude-sonnet-4.5"
           governance_dir: .
 
       - name: Run AsyncAPI audit
@@ -106,5 +106,5 @@ jobs:
           repo: ${{ github.repository }}
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
-          copilot_model: "gpt-5-mini"
+          copilot_model: "claude-sonnet-4.5"
           governance_dir: .
