@@ -1,5 +1,5 @@
 name: Validate AsyncAPI (Spectral + Copilot)
-description: Runs AsyncAPI ruleset with Spectral + semantic audit with Copilot in parallel, comments PR, sends metrics.
+description: Runs AsyncAPI ruleset with Spectral + semantic audit with Copilot in parallel and comments the PR.
 
 inputs:
   spec_file:
@@ -25,19 +25,6 @@ inputs:
   governance_dir:
     required: true
     description: Ruta local donde ya fue checkouteado el repo de governance.
-  gcp_service_account_json:
-    required: false
-    default: ""
-    description: GCP Service Account JSON. Si viene vacío, no se ejecuta BigQuery.
-  bq_project_id:
-    required: false
-    default: tecnogia-arqdat-governance-prd
-  bq_dataset_id:
-    required: false
-    default: TECNOGIA_GESTION_IT_RAW
-  bq_table_name:
-    required: false
-    default: gerencia_it_facts_raw
   copilot_model:
     required: false
     description: Modelo de Copilot para el audit semántico. Definir desde el workflow caller.
@@ -71,8 +58,6 @@ outputs:
     value: ${{ steps.totals.outputs.status }}
   infra_failed:
     value: ${{ steps.totals.outputs.infra_failed }}
-  bq_should_run:
-    value: ${{ steps.totals.outputs.bq_should_run }}
 
 runs:
   using: composite
@@ -278,9 +263,9 @@ runs:
         trap _on_err ERR
 
         if [[ -z "${{ inputs.copilot_token }}" ]]; then
-          _fail_copilot "falta copilot_token (infra, PR rechazado y NO BigQuery)."
+          _fail_copilot "falta copilot_token (infra, PR rechazado)."
         elif [[ ! -s "$SPEC" ]]; then
-          _fail_copilot "archivo inexistente o vacío: $SPEC (infra, PR rechazado y NO BigQuery)."
+          _fail_copilot "archivo inexistente o vacío: $SPEC (infra, PR rechazado)."
         else
           log_time "copilot.build_min.begin"
           ruby "$SCRIPTS_DIR/build_asyncapi_min.rb" \
@@ -448,7 +433,7 @@ runs:
         CF="${CF:-0}"
 
         TOTAL_ERR=$((SE + CE))
-        TOTAL_WAR=$((SW + CW))
+        TOTAL_WAR=$SW+$CW
 
         INFRA_FAILED=0
         if [[ "$SF" -eq 1 ]] || [[ "$CF" -eq 1 ]]; then
@@ -460,50 +445,10 @@ runs:
           STATUS="FAIL"
         fi
 
-        BQ_SHOULD_RUN=0
-        if [[ "$INFRA_FAILED" -eq 0 ]] && [[ -n "${{ inputs.gcp_service_account_json }}" ]]; then
-          BQ_SHOULD_RUN=1
-        fi
-
         echo "total_errors=$TOTAL_ERR" >> "$GITHUB_OUTPUT"
         echo "total_warnings=$TOTAL_WAR" >> "$GITHUB_OUTPUT"
         echo "infra_failed=$INFRA_FAILED" >> "$GITHUB_OUTPUT"
-        echo "bq_should_run=$BQ_SHOULD_RUN" >> "$GITHUB_OUTPUT"
         echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-
-    - name: Auth to Google Cloud
-      if: steps.totals.outputs.bq_should_run == '1'
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ inputs.gcp_service_account_json }}
-        project_id: ${{ inputs.bq_project_id }}
-
-    - name: Setup gcloud
-      if: steps.totals.outputs.bq_should_run == '1'
-      uses: google-github-actions/setup-gcloud@v3
-      with:
-        project_id: ${{ inputs.bq_project_id }}
-
-    - name: Run BQ Insert
-      if: steps.totals.outputs.bq_should_run == '1'
-      shell: bash
-      run: |
-        set -euo pipefail
-
-        REPO_NAME="${{ inputs.repo }}"
-        REPO_NAME="${REPO_NAME##*/}"
-
-        VAL="0.0"
-        if [[ "${{ steps.totals.outputs.status }}" == "PASS" ]]; then
-          VAL="1.0"
-        fi
-
-        TEAM="$(ruby -e 'require "json"; require "yaml"; text = File.read("config-values.json", encoding: "UTF-8"); data = begin; JSON.parse(text); rescue JSON::ParserError; YAML.safe_load(text, aliases: false); end; abort("config-values.json debe contener un objeto") unless data.is_a?(Hash); team = data["team"]; abort("La propiedad team no existe o está vacía en config-values.json") unless team.is_a?(String) && !team.strip.empty?; puts team.strip')"
-
-        REPO_NAME_SQL="${REPO_NAME//\'/\\\'}"
-        TEAM_SQL="${TEAM//\'/\\\'}"
-
-        bq query --quiet --use_legacy_sql=false "INSERT INTO \`${{ inputs.bq_project_id }}.${{ inputs.bq_dataset_id }}.${{ inputs.bq_table_name }}\` (date, metric_id, metric_name, repo_name, cell_name, metric_value) VALUES (CURRENT_DATE(), 78, 'Asyncapi Compliance', '${REPO_NAME_SQL}', '${TEAM_SQL}', ${VAL})"
 
     - name: Comment PR with Report
       if: always()
@@ -514,15 +459,15 @@ runs:
         set -euo pipefail
 
         {
-          echo "## 🤖 BX API Technical Audit Report"
+          echo "## 🤖 API Technical Audit Report"
           echo "### 🔍 Contexto: ${{ inputs.spec_file }}"
           echo
           echo "### 📊 Métricas"
           echo "| Fuente | Errores 🔴 | Adv 🟡 |"
           echo "| :--- | :---: | :---: |"
           echo "| **Spectral** | ${{ steps.audit.outputs.spectral_errors }} | ${{ steps.audit.outputs.spectral_warnings }} |"
-          echo "| **Copilot**  | ${{ steps.audit.outputs.copilot_errors }} | ${{ steps.audit.outputs.copilot_warnings }} |"
-          echo "| **TOTAL**    | **${{ steps.totals.outputs.total_errors }}** | **${{ steps.totals.outputs.total_warnings }}** |"
+          echo "| **Copilot** | ${{ steps.audit.outputs.copilot_errors }} | ${{ steps.audit.outputs.copilot_warnings }} |"
+          echo "| **TOTAL** | **${{ steps.totals.outputs.total_errors }}** | **${{ steps.totals.outputs.total_warnings }}** |"
           echo
           echo "### 🔧 Spectral"
           if [[ "${{ steps.audit.outputs.spectral_failed }}" == "1" ]]; then
@@ -544,11 +489,6 @@ runs:
           fi
           echo
           echo "---"
-          if [[ "${{ steps.totals.outputs.bq_should_run }}" == "1" ]]; then
-            echo "📈 **BigQuery:** Registrado."
-          else
-            echo "🚫 **BigQuery:** NO registrado."
-          fi
           echo
           if [[ "${{ steps.totals.outputs.status }}" == "PASS" ]]; then
             echo "### ✅ **ESTADO: APROBADO**"
