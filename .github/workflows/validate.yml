@@ -2,7 +2,7 @@ name: API Technical Audit
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - "spec/**"
@@ -31,21 +31,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Checkout governance repo
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/OpenApi-AsyncApi-SPECS
-          ref: main
-          path: governance-repo
-          token: ${{ secrets.GOVERNANCE_REPO_TOKEN }}
-          fetch-depth: 1
-          sparse-checkout: |
-            rulesets/openapi-rules.yaml
-            prompts/openapi-prompt.md
-            rulesets/asyncapi-rules.yaml
-            prompts/asyncapi-prompt.md
-          sparse-checkout-cone-mode: false
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -67,7 +52,6 @@ jobs:
               exit 1
             fi
           done
-
 
       - name: Detect modified API spec and type
         id: spec
@@ -103,24 +87,24 @@ jobs:
 
       - name: Run OpenAPI audit
         if: steps.spec.outputs.type == 'openapi'
-        uses: ./.github/actions/validate-openapi
+        uses: d1ekgo/OpenApi-AsyncApi-AUTOMATOR/.github/actions/validate-openapi@main
         with:
           spec_file: ${{ steps.spec.outputs.file }}
           pr_number: ${{ github.event.pull_request.number }}
           repo: ${{ github.repository }}
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
-          copilot_model: "claude-sonnet-4.5"
-          governance_dir: governance-repo
+          copilot_model: "gpt-5-mini"
+          governance_dir: .
 
       - name: Run AsyncAPI audit
         if: steps.spec.outputs.type == 'asyncapi'
-        uses: ./.github/actions/validate-asyncapi
+        uses: d1ekgo/OpenApi-AsyncApi-AUTOMATOR/.github/actions/validate-asyncapi@main
         with:
           spec_file: ${{ steps.spec.outputs.file }}
           pr_number: ${{ github.event.pull_request.number }}
           repo: ${{ github.repository }}
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
-          copilot_model: "claude-sonnet-4.5"
-          governance_dir: governance-repo
+          copilot_model: "gpt-5-mini"
+          governance_dir: .
