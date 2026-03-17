@@ -148,7 +148,7 @@ runs:
               echo "spectral_failed=$failed"
               echo "spectral_errors=$errors"
               echo "spectral_warnings=0"
-              echo "spectral_failed_reason=$reason"
+              printf 'spectral_failed_reason=%q\n' "$reason"
             } > /tmp/spectral_out.env
             log_time "spectral.fail failed=$failed errors=$errors reason=$reason"
             exit 0
@@ -254,7 +254,7 @@ runs:
             echo "copilot_errors=0"
             echo "copilot_warnings=0"
             echo "copilot_failed=1"
-            echo "copilot_failed_reason=${reason}"
+            printf 'copilot_failed_reason=%q\n' "$reason"
           } > /tmp/copilot_out.env
 
           echo "${reason}" > copilot_failed_reason.txt
@@ -379,7 +379,7 @@ runs:
                 echo "copilot_errors=${copilot_errors:-0}"
                 echo "copilot_warnings=${copilot_warnings:-0}"
                 echo "copilot_failed=${copilot_failed:-0}"
-                echo "copilot_failed_reason=$(cat copilot_failed_reason.txt 2>/dev/null || true)"
+                printf 'copilot_failed_reason=%q\n' "$(cat copilot_failed_reason.txt 2>/dev/null || true)"
               } > /tmp/copilot_out.env
 
               log_time "copilot.end failed=${copilot_failed:-0} errors=${copilot_errors:-0} warnings=${copilot_warnings:-0}"
@@ -397,7 +397,7 @@ runs:
             echo "spectral_failed=1"
             echo "spectral_errors=1"
             echo "spectral_warnings=0"
-            echo "spectral_failed_reason=Spectral proceso background falló (exit=$SPEC_BG_EXIT)"
+            printf 'spectral_failed_reason=%q\n' "Spectral proceso background falló (exit=$SPEC_BG_EXIT)"
           } > /tmp/spectral_out.env
         fi
 
