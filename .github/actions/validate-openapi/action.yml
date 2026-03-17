@@ -72,10 +72,10 @@ runs:
       run: |
         set -euo pipefail
 
-        RULESET="${{ inputs.governance_dir }}/rulesets/openapi-rules.yaml"
-        PROMPT="${{ inputs.governance_dir }}/prompts/openapi-prompt.md"
-        SPEC="${{ inputs.spec_file }}"
-        SCRIPTS_DIR="$ACTION_PATH/scripts"
+          RULESET="$GOV_DIR/rulesets/openapi-rules.yaml"
+          PROMPT="$GOV_DIR/prompts/openapi-prompt.md"
+          SPEC="${{ inputs.spec_file }}"
+          SCRIPTS_DIR="$ACTION_PATH/scripts"
 
         emit_output_escaped() {
           local key="$1" file="$2" value=""
