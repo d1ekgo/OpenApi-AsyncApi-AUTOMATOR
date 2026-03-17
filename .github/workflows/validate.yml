@@ -34,7 +34,7 @@ jobs:
       - name: Checkout governance repo
         uses: actions/checkout@v4
         with:
-          repository: TU_USUARIO/TU_REPO_GOVERNANCE
+          repository: ${{ github.repository_owner }}/OpenApi-AsyncApi-SPECS
           ref: main
           path: governance-repo
           token: ${{ secrets.GOVERNANCE_REPO_TOKEN }}
@@ -68,11 +68,6 @@ jobs:
             fi
           done
 
-      - name: Get PR metadata
-        id: prmeta
-        shell: bash
-        run: |
-          echo "author=${{ github.event.pull_request.user.login }}" >> "$GITHUB_OUTPUT"
 
       - name: Detect modified API spec and type
         id: spec
@@ -112,12 +107,10 @@ jobs:
         with:
           spec_file: ${{ steps.spec.outputs.file }}
           pr_number: ${{ github.event.pull_request.number }}
-          pr_author: ${{ steps.prmeta.outputs.author }}
           repo: ${{ github.repository }}
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
           copilot_model: "gpt-5-mini"
-          gcp_service_account_json: ${{ secrets.SERVICE_ACCOUNT }}
           governance_dir: governance-repo
 
       - name: Run AsyncAPI audit
@@ -126,10 +119,8 @@ jobs:
         with:
           spec_file: ${{ steps.spec.outputs.file }}
           pr_number: ${{ github.event.pull_request.number }}
-          pr_author: ${{ steps.prmeta.outputs.author }}
           repo: ${{ github.repository }}
           github_token: ${{ github.token }}
           copilot_token: ${{ secrets.COPILOT_TOKEN }}
           copilot_model: "gpt-5-mini"
-          gcp_service_account_json: ${{ secrets.SERVICE_ACCOUNT }}
           governance_dir: governance-repo
